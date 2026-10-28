@@ -209,6 +209,27 @@ body.proyector .qr,body.proyector .tiempo{width:min(100%,66vh)}
 @media(prefers-reduced-motion:reduce){
   li.nuevo,li.nuevo .marca,.resultado h1{animation:none!important}
 }
+.botones-cabeza{display:flex;flex-wrap:wrap;gap:.5rem}
+.codigo{font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;font-weight:700;letter-spacing:.12em}
+#codigo{text-transform:uppercase;letter-spacing:.15em}
+.confirmacion{font-size:1.2rem;font-weight:700;margin-top:.75rem}
+.manual input{flex:1 1 100%;font-size:1rem;padding:.6rem .75rem}
+
+/* Papelitos con los códigos personales: solo existen mientras se imprime. */
+#impresion{display:none}
+@media print{
+  @page{margin:12mm}
+  body{background:#fff}
+  body > *:not(#impresion){display:none!important}
+  #impresion{display:block;color:#000;font:11pt/1.35 var(--texto)}
+  .papeles{display:grid;grid-template-columns:1fr 1fr}
+  .papel{border:1px dashed #777;padding:10px 14px;break-inside:avoid}
+  .papel p{margin:.15rem 0}
+  .papel-escuela{font-size:9pt;color:#444}
+  .papel-nombre{font-weight:700;font-size:12pt}
+  .papel-cod{font-family:ui-monospace,Consolas,monospace;font-size:17pt;letter-spacing:.18em}
+  .papel-nota{font-size:8.5pt;color:#444}
+}
 </style>
 </head>
 <body>
@@ -221,6 +242,8 @@ body.proyector .qr,body.proyector .tiempo{width:min(100%,66vh)}
 
 const QR_LIB = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+const ESTADOS_ALUMNO = ['Activo', 'Inactivo', 'Egresado'];
+const ROLES = ['Profesor', 'Administración'];
 const app = document.getElementById('app');
 const $ = function (sel) { return document.querySelector(sel); };
 const esc = function (s) {
@@ -282,13 +305,14 @@ async function api(accion, datos) {
   }
   try { json = await respuesta.json(); }
   catch (e) { throw new Error('El servidor respondió algo inesperado. Revisá la URL de la Web App.'); }
-  if (!json.ok) throw new Error(json.error || 'Ocurrió un error.');
+  if (!json.ok) throw new Error(json.error === 'Acción desconocida.' ? VIEJO : (json.error || 'Ocurrió un error.'));
   return json.datos;
 }
+const VIEJO = 'El backend sigue en la versión anterior. En Apps Script: Implementar → Gestionar implementaciones → lápiz → Versión: Nueva versión → Implementar.';
 
 let sesion = store.get('aq_sesion');
 
-/** Pedido con la sesión del docente. Si la sesión venció, vuelve al ingreso y marca el error como "silencio". */
+/** Pedido con la sesión del panel. Si la sesión venció, vuelve al ingreso y marca el error como "silencio". */
 async function apiDocente(accion, datos) {
   try {
     return await api(accion, Object.assign({ sesion: sesion }, datos));
@@ -329,7 +353,7 @@ function vistaLogin(mensaje) {
       '</section>' +
       '<label for="usuario">Usuario</label>' +
       '<input id="usuario" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" value="' + esc(store.get('aq_usuario') || '') + '">' +
-      '<p class="nota">Profesores: tu DNI, sin puntos. Administración: admin.</p>' +
+      '<p class="nota">Tu DNI, sin puntos. Cuenta principal de administración: admin.</p>' +
       '<label for="clave">Clave</label>' +
       '<input id="clave" type="password" autocomplete="current-password">' +
       '<p class="error" id="err" role="alert">' + esc(mensaje || '') + '</p>' +
@@ -344,7 +368,7 @@ function vistaLogin(mensaje) {
     ocupar(boton, true); mostrarError('');
     try {
       const d = await api('login', { usuario: usuario, clave: $('#clave').value });
-      if (!d.yo) throw new Error('El backend sigue en la versión anterior. En Apps Script: Implementar → Gestionar implementaciones → lápiz → Versión: Nueva versión → Implementar.');
+      if (!d.yo || d.minutosClase === undefined) throw new Error(VIEJO);
       sesion = d.sesion;
       store.set('aq_sesion', sesion);
       store.set('aq_usuario', usuario);
@@ -362,11 +386,11 @@ function vistaLogin(mensaje) {
 
 /* ═══════════════ Panel con secciones ═══════════════ */
 
-/** Estado del panel. cat = catálogo de administración (cursos, materias, profesores, alumnos). */
+/** Estado del panel. cat = catálogo de administración (cursos, materias, usuarios, alumnos). */
 const S = {
   yo: null, escuela: '', seccion: 'inicio',
-  inicio: null, cat: null, catHora: 0, historial: null, informes: null,
-  filtroCurso: '', busca: '', mes: '', cursoInforme: ''
+  inicio: null, cat: null, catHora: 0, historial: null, informes: null, auditoria: null,
+  filtroCurso: '', filtroEstado: 'Activo', busca: '', mes: '', cursoInforme: ''
 };
 
 // [clave, título en el menú, solo administración]
@@ -374,19 +398,21 @@ const SECCIONES = [
   ['inicio', 'Inicio', false],
   ['cursos', 'Cursos', true],
   ['materias', 'Materias', true],
-  ['profesores', 'Profesores', true],
+  ['usuarios', 'Usuarios', true],
   ['alumnos', 'Alumnos', true],
   ['clases', 'Clases dadas', false],
-  ['informes', 'Informes', true]
+  ['informes', 'Informes', true],
+  ['auditoria', 'Auditoría', true]
 ];
-const CLAVE_DE = { cursos: 'nombre', materias: 'id', profesores: 'dni', alumnos: 'dni' };
-const SINGULAR = { cursos: 'curso', materias: 'materia', profesores: 'profesor', alumnos: 'alumno' };
+const CATALOGO = ['cursos', 'materias', 'usuarios', 'alumnos'];
+const CLAVE_DE = { cursos: 'nombre', materias: 'id', usuarios: 'dni', alumnos: 'dni' };
+const SINGULAR = { cursos: 'curso', materias: 'materia', usuarios: 'usuario', alumnos: 'alumno' };
 
 function esAdmin() { return S.yo && S.yo.rol === 'admin'; }
 
 function entrarAlPanel(d) {
   S.yo = d.yo; S.escuela = d.escuela; S.inicio = d;
-  S.cat = null; S.historial = null; S.informes = null; S.seccion = 'inicio';
+  S.cat = null; S.historial = null; S.informes = null; S.auditoria = null; S.seccion = 'inicio';
   armarMarco();
   pintarSeccion();
 }
@@ -438,6 +464,7 @@ async function ir(seccion) {
     if (seccion === 'inicio') S.inicio = await apiDocente('inicio', {});
     else if (seccion === 'clases') S.historial = await apiDocente('historial', {});
     else if (seccion === 'informes') S.informes = await apiDocente('informes', { mes: S.mes });
+    else if (seccion === 'auditoria') S.auditoria = await apiDocente('auditoria', {});
     else if (!S.cat || Date.now() - S.catHora > 60000) { S.cat = await apiDocente('catalogo', {}); S.catHora = Date.now(); }
   } catch (e) {
     if (e.silencio || S.seccion !== seccion) return;
@@ -496,9 +523,22 @@ function filtroDeCurso(cursos) {
   return '<div><label for="f-curso">Curso</label><select id="f-curso">' +
     opciones([['', 'Todos los cursos']].concat(cursos.map(function (c) { return [c, c]; })), S.filtroCurso) + '</select></div>';
 }
-function cabeza(titulo, tipo, textoBoton) {
-  return '<div class="cabeza"><h1>' + titulo + '</h1>' +
-    (tipo ? '<button class="btn chico" type="button" data-a="nuevo" data-tipo="' + tipo + '">' + textoBoton + '</button>' : '') + '</div>';
+function cabeza(titulo, botones) {
+  return '<div class="cabeza"><h1>' + titulo + '</h1><div class="botones-cabeza">' + (botones || '') + '</div></div>';
+}
+function botonNuevo(tipo, texto) {
+  return '<button class="btn chico" type="button" data-a="nuevo" data-tipo="' + tipo + '">' + texto + '</button>';
+}
+function nombresDeCursos() { return S.cat.cursos.map(function (c) { return c.nombre; }); }
+
+/** Alumnos según los filtros de la sección Alumnos. */
+function alumnosFiltrados() {
+  const busca = S.busca.trim().toLowerCase();
+  return S.cat.alumnos.filter(function (a) {
+    return (!S.filtroCurso || a.curso === S.filtroCurso) &&
+      (!S.filtroEstado || a.estado === S.filtroEstado) &&
+      (!busca || a.nombre.toLowerCase().indexOf(busca) >= 0 || a.dni.indexOf(busca) >= 0);
+  });
 }
 
 /* Cada sección: ARMAR dibuja título y filtros; ZONA dibuja las tablas. */
@@ -510,7 +550,7 @@ const ARMAR = {
       h += '<h2>Clases abiertas ahora</h2>' + tabla([
         { t: 'Curso', v: function (c) { return '<b>' + esc(c.curso) + '</b>'; } },
         { t: 'Materia', v: function (c) { return esc(c.materia) + (esAdmin() ? '<small>' + esc(c.docente) + '</small>' : ''); } },
-        { t: 'Desde', v: function (c) { return hora(c.inicio); } },
+        { t: 'Horario', v: function (c) { return hora(c.inicio) + ' a ' + hora(c.cierre); } },
         { acc: true, v: function (c) { return boton('Volver a la clase', 'ver-clase', c.id, 'lleno'); } }
       ], d.abiertas, '');
     }
@@ -533,23 +573,29 @@ const ARMAR = {
   },
 
   cursos: function () {
-    return cabeza('Cursos', 'cursos', 'Agregar curso') + '<div id="zona"></div>';
+    return cabeza('Cursos', botonNuevo('cursos', 'Agregar curso')) + '<div id="zona"></div>';
   },
 
   materias: function () {
-    return cabeza('Materias', S.cat.cursos.length ? 'materias' : '', 'Agregar materia') +
-      '<p class="nota">Cada materia se carga una vez por curso, con el profesor que la da. Ese profesor la ve al entrar con su usuario.</p>' +
-      '<div class="filtros">' + filtroDeCurso(S.cat.cursos.map(function (c) { return c.nombre; })) + '</div><div id="zona"></div>';
+    return cabeza('Materias', S.cat.cursos.length ? botonNuevo('materias', 'Agregar materia') : '') +
+      '<p class="nota">Cada materia se carga una vez por curso, con el usuario que la da. Ese usuario la ve al entrar.</p>' +
+      '<div class="filtros">' + filtroDeCurso(nombresDeCursos()) + '</div><div id="zona"></div>';
   },
 
-  profesores: function () {
-    return cabeza('Profesores', 'profesores', 'Agregar profesor') +
-      '<p class="nota">Cada profesor entra con su DNI como usuario y la clave que le cargues acá.</p><div id="zona"></div>';
+  usuarios: function () {
+    return cabeza('Usuarios', botonNuevo('usuarios', 'Agregar usuario')) +
+      '<p class="nota">Cada usuario entra con su DNI y su clave. Rol Profesor: toma lista de sus materias. Rol Administración: además carga datos, corrige cualquier clase y ve informes y auditoría.</p>' +
+      '<div id="zona"></div>';
   },
 
   alumnos: function () {
-    return cabeza('Alumnos', S.cat.cursos.length ? 'alumnos' : '', 'Agregar alumno') +
-      '<div class="filtros">' + filtroDeCurso(S.cat.cursos.map(function (c) { return c.nombre; })) +
+    const botones = S.cat.cursos.length
+      ? '<button class="btn chico claro" type="button" data-a="imprimir">Imprimir códigos</button>' + botonNuevo('alumnos', 'Agregar alumno')
+      : '';
+    return cabeza('Alumnos', botones) +
+      '<div class="filtros">' + filtroDeCurso(nombresDeCursos()) +
+      '<div><label for="f-estado">Estado</label><select id="f-estado">' +
+        opciones([['Activo', 'Activos'], ['Inactivo', 'Inactivos'], ['Egresado', 'Egresados'], ['', 'Todos']], S.filtroEstado) + '</select></div>' +
       '<div><label for="f-busca">Buscar por nombre o DNI</label><input id="f-busca" type="search" value="' + esc(S.busca) + '"></div></div>' +
       '<div id="zona"></div>';
   },
@@ -579,6 +625,17 @@ const ARMAR = {
         '<div><label for="f-curso-informe">Curso</label><select id="f-curso-informe">' +
           opciones([['', 'Todos los cursos']].concat(lista.map(function (c) { return [c, c]; })), S.cursoInforme) + '</select></div>' +
       '</div><div id="zona"></div>';
+  },
+
+  auditoria: function () {
+    return '<h1>Auditoría</h1>' +
+      '<p class="nota">Últimos 300 movimientos: altas, ediciones y bajas; marcas a mano y correcciones de asistencia; clases reabiertas; códigos nuevos y celulares desvinculados o cambiados. La lista completa está en la hoja Auditoría de la planilla.</p>' +
+      tabla([
+        { t: 'Fecha', v: function (r) { return dia(r.fecha) + '<small>' + hora(r.fecha) + '</small>'; } },
+        { t: 'Usuario', v: function (r) { return esc(r.usuario); } },
+        { t: 'Acción', v: function (r) { return '<b>' + esc(r.accion) + '</b>'; } },
+        { t: 'Detalle', v: function (r) { return esc(r.detalle); } }
+      ], S.auditoria, 'Todavía no hay movimientos registrados.');
   }
 };
 
@@ -590,21 +647,26 @@ const ZONA = {
     const filas = materias.map(function (m) { return { tipo: 'materia', id: m.id, curso: m.curso, materia: m.materia, docente: m.profesorNombre || 'Sin profesor asignado', alumnos: m.alumnos }; })
       .concat(general.map(function (c) { return { tipo: 'general', id: c.nombre, curso: c.nombre, materia: 'Asistencia general', docente: 'Sin materia: la toma administración', alumnos: c.alumnos }; }));
     const vacio = esAdmin()
-      ? 'Todavía no hay cursos con alumnos. Cargalos en las secciones Cursos y Alumnos.'
+      ? 'Todavía no hay cursos con alumnos activos. Cargalos en las secciones Cursos y Alumnos.'
       : 'Todavía no tenés materias a tu nombre. Pedile a administración que te las asigne.';
     return tabla([
       { t: 'Curso', v: function (f) { return '<b>' + esc(f.curso) + '</b>'; } },
       { t: 'Materia', v: function (f) { return esc(f.materia) + (esAdmin() ? '<small>' + esc(f.docente) + '</small>' : ''); } },
       { t: 'Alumnos', num: true, v: function (f) { return f.alumnos; } },
-      { acc: true, v: function (f) { return boton('Abrir clase', f.tipo === 'materia' ? 'abrir-materia' : 'abrir-general', f.id, 'lleno'); } }
+      { acc: true, v: function (f) {
+        return '<button class="mini lleno" type="button" data-a="abrir" data-tipo="' + f.tipo + '" data-id="' + esc(f.id) + '" data-titulo="' +
+          esc(f.materia + ', ' + f.curso) + '">Abrir clase</button>';
+      } }
     ], filas, vacio);
   },
 
   cursos: function () {
     return tabla([
       { t: 'Curso', v: function (c) { return '<b>' + esc(c.nombre) + '</b>'; } },
+      { t: 'Año', v: function (c) { return esc(c.anio); } },
+      { t: 'División', v: function (c) { return esc(c.division); } },
       { t: 'Turno', v: function (c) { return esc(c.turno); } },
-      { t: 'Alumnos', num: true, v: function (c) { return c.alumnos; } },
+      { t: 'Alumnos activos', num: true, v: function (c) { return c.alumnos; } },
       { t: 'Materias', num: true, v: function (c) { return c.materias; } },
       { acc: true, v: function (c) { return boton('Ver alumnos', 'ver-alumnos', c.nombre) + botonesDeFila('cursos', c.nombre); } }
     ], S.cat.cursos, 'Todavía no hay cursos. Agregá el primero con el botón de arriba.');
@@ -621,33 +683,33 @@ const ZONA = {
     ], filas, S.filtroCurso ? 'Ese curso todavía no tiene materias.' : 'Todavía no hay materias. Agregá la primera con el botón de arriba.');
   },
 
-  profesores: function () {
+  usuarios: function () {
     return tabla([
-      { t: 'Apellido y nombre', v: function (p) { return '<b>' + esc(p.nombre) + '</b>'; } },
-      { t: 'Usuario (DNI)', v: function (p) { return esc(p.dni); } },
-      { t: 'Materias', num: true, v: function (p) { return p.materias; } },
-      { t: 'Clave', v: function (p) { return p.tieneClave ? 'Cargada' : '<span class="etiqueta">Sin clave</span>'; } },
-      { acc: true, v: function (p) { return botonesDeFila('profesores', p.dni); } }
-    ], S.cat.profesores, 'Todavía no hay profesores. Agregá el primero con el botón de arriba.');
+      { t: 'Apellido y nombre', v: function (u) { return '<b>' + esc(u.nombre) + '</b>'; } },
+      { t: 'Usuario (DNI)', v: function (u) { return esc(u.dni); } },
+      { t: 'Rol', v: function (u) { return u.rol === 'Administración' ? '<span class="etiqueta">Administración</span>' : 'Profesor'; } },
+      { t: 'Materias', num: true, v: function (u) { return u.materias; } },
+      { t: 'Clave', v: function (u) { return u.tieneClave ? 'Cargada' : '<span class="etiqueta">Sin clave</span>'; } },
+      { acc: true, v: function (u) { return botonesDeFila('usuarios', u.dni); } }
+    ], S.cat.usuarios, 'Todavía no hay usuarios. Agregá el primero con el botón de arriba.');
   },
 
   alumnos: function () {
     if (!S.cat.cursos.length) return '<p class="vacio">Primero cargá al menos un curso en la sección Cursos.</p>';
-    const busca = S.busca.trim().toLowerCase();
-    const todos = S.cat.alumnos.filter(function (a) {
-      return (!S.filtroCurso || a.curso === S.filtroCurso) &&
-        (!busca || a.nombre.toLowerCase().indexOf(busca) >= 0 || a.dni.indexOf(busca) >= 0);
-    });
+    const todos = alumnosFiltrados();
     const tope = 300;
     return '<p class="nota">' + plural(todos.length, 'alumno', 'alumnos') +
       (todos.length > tope ? '. Se muestran los primeros ' + tope + ': filtrá por curso o buscá para ver el resto.' : '') + '</p>' +
       tabla([
-        { t: 'Apellido y nombre', v: function (a) { return '<b>' + esc(a.nombre) + '</b>'; } },
+        { t: 'Apellido y nombre', v: function (a) { return '<b>' + esc(a.nombre) + '</b>' + (a.estado !== 'Activo' ? ' <span class="etiqueta">' + esc(a.estado) + '</span>' : ''); } },
         { t: 'DNI', v: function (a) { return esc(a.dni); } },
         { t: 'Curso', v: function (a) { return esc(a.curso); } },
+        { t: 'Código', v: function (a) { return a.codigo ? '<span class="codigo">' + esc(a.codigo) + '</span>' : '<span class="etiqueta">Sin código</span>'; } },
         { t: 'Celular', v: function (a) { return a.vinculado ? 'Vinculado' + boton('Desvincular', 'desvincular', a.dni) : '<span class="nota">Sin vincular</span>'; } },
-        { acc: true, v: function (a) { return botonesDeFila('alumnos', a.dni); } }
-      ], todos.slice(0, tope), busca || S.filtroCurso ? 'No hay alumnos que coincidan.' : 'Todavía no hay alumnos. Agregá el primero con el botón de arriba.');
+        { acc: true, v: function (a) { return '<button class="mini" type="button" data-a="editar" data-tipo="alumnos" data-id="' + esc(a.dni) + '">Editar</button>' +
+            boton('Código nuevo', 'nuevo-codigo', a.dni) +
+            '<button class="mini peligro" type="button" data-a="borrar" data-tipo="alumnos" data-id="' + esc(a.dni) + '">Borrar</button>'; } }
+      ], todos.slice(0, tope), S.busca || S.filtroCurso || S.filtroEstado !== 'Activo' ? 'No hay alumnos que coincidan.' : 'Todavía no hay alumnos. Agregá el primero con el botón de arriba.');
   },
 
   informes: function () {
@@ -687,20 +749,22 @@ function clicEnPanel(ev) {
   if (t.dataset.ir) return ir(t.dataset.ir);
   const id = t.dataset.id, tipo = t.dataset.tipo;
   switch (t.dataset.a) {
-    case 'abrir-materia': return abrirClase(t, 'iniciar', { materia: id });
-    case 'abrir-general': return abrirClase(t, 'iniciar', { curso: id });
+    case 'abrir': return dialogoAbrir(tipo === 'materia' ? { materia: id } : { curso: id }, t.dataset.titulo);
     case 'ver-clase': return abrirClase(t, 'estado', { c: id });
-    case 'ver-alumnos': S.filtroCurso = id; S.busca = ''; return ir('alumnos');
+    case 'ver-alumnos': S.filtroCurso = id; S.filtroEstado = 'Activo'; S.busca = ''; return ir('alumnos');
     case 'nuevo': return formulario(tipo, null);
     case 'editar': { const item = buscar(tipo, id); return item ? formulario(tipo, item) : null; }
     case 'borrar': return pedirBorrado(tipo, buscar(tipo, id));
     case 'desvincular': return pedirDesvincular(buscar('alumnos', id));
+    case 'nuevo-codigo': return pedirNuevoCodigo(buscar('alumnos', id));
+    case 'imprimir': return imprimirCodigos();
   }
 }
 
 function cambioEnPanel(ev) {
   const t = ev.target;
   if (t.id === 'f-curso') { S.filtroCurso = t.value; pintarZona(); }
+  if (t.id === 'f-estado') { S.filtroEstado = t.value; pintarZona(); }
   if (t.id === 'f-curso-informe') { S.cursoInforme = t.value; pintarZona(); }
   if (t.id === 'f-mes') { S.mes = t.value; ir('informes'); }
 }
@@ -718,11 +782,11 @@ async function abrirClase(boton, accion, datos) {
 /** Guarda el catálogo que devuelve el servidor después de cada cambio y vuelve a dibujar. */
 function catalogoNuevo(cat) {
   S.cat = cat; S.catHora = Date.now();
-  if ($('#contenido') && ARMAR[S.seccion] && S.seccion !== 'inicio' && S.seccion !== 'clases' && S.seccion !== 'informes') pintarSeccion();
+  if ($('#contenido') && CATALOGO.indexOf(S.seccion) >= 0) pintarSeccion();
 }
 
 
-/* ═══════════════ Diálogos: alta, edición y borrado ═══════════════ */
+/* ═══════════════ Diálogos ═══════════════ */
 
 function cerrarDialogo() {
   const capa = document.getElementById('capa');
@@ -765,29 +829,54 @@ function abrirDialogo(html, textoAceptar, alAceptar, peligro) {
   };
   const primero = capa.querySelector('input,select') || capa.querySelector('#dlg-ok');
   primero.focus();
+  return capa;
+}
+
+/** Antes de abrir una clase se elige cuánto dura: pasado ese tiempo se cierra sola. */
+function dialogoAbrir(datos, titulo) {
+  const def = S.inicio.minutosClase || 80;
+  const duraciones = [[40, '40 minutos'], [60, '1 hora'], [80, '80 minutos'], [120, '2 horas'], [160, '2 horas y 40 minutos'], [240, '4 horas']];
+  if (!duraciones.some(function (d) { return d[0] === def; })) duraciones.push([def, def + ' minutos']);
+  duraciones.sort(function (a, b) { return a[0] - b[0]; });
+  const capa = abrirDialogo(
+    '<h2 id="dlg-t">Abrir ' + esc(titulo) + '</h2>' +
+    '<label for="c-min">Duración</label><select id="c-min">' + opciones(duraciones, def) + '</select>' +
+    '<p class="nota" id="c-fin"></p>' +
+    '<p class="nota">Pasado ese tiempo la clase se cierra sola y quienes no marcaron quedan ausentes. Desde la pantalla de la clase se puede extender o cerrar antes.</p>',
+    'Abrir clase', async function (capa) {
+      vistaClase(await apiDocente('iniciar', Object.assign({ minutos: Number(capa.querySelector('#c-min').value) }, datos)));
+    });
+  const fin = function () { capa.querySelector('#c-fin').textContent = 'Se cierra sola a las ' + hora(Date.now() + Number(capa.querySelector('#c-min').value) * 60000) + '.'; };
+  capa.querySelector('#c-min').addEventListener('change', fin);
+  fin();
 }
 
 /** Campos del formulario de cada tipo. op = lista de opciones [valor, texto]. */
 function camposDe(tipo, item) {
   const cursos = S.cat.cursos.map(function (c) { return [c.nombre, c.nombre]; });
-  const profes = [['', 'Sin asignar']].concat(S.cat.profesores.map(function (p) { return [p.dni, p.nombre]; }));
+  const profes = [['', 'Sin asignar']].concat(S.cat.usuarios.map(function (u) { return [u.dni, u.nombre]; }));
   const cursoInicial = S.filtroCurso || (cursos[0] || [''])[0];
+  const pares = function (lista) { return lista.map(function (x) { return [x, x]; }); };
   switch (tipo) {
     case 'cursos': return [
-      { k: 'nombre', t: 'Nombre del curso', ej: '3° B' },
-      { k: 'turno', t: 'Turno', op: [['', 'Sin indicar'], ['Mañana', 'Mañana'], ['Tarde', 'Tarde'], ['Noche', 'Noche']] }];
+      { k: 'anio', t: 'Año', ej: '3°' },
+      { k: 'division', t: 'División', ej: 'B' },
+      { k: 'turno', t: 'Turno', op: [['', 'Sin indicar'], ['Mañana', 'Mañana'], ['Tarde', 'Tarde'], ['Vespertino', 'Vespertino'], ['Noche', 'Noche']] }];
     case 'materias': return [
       { k: 'materia', t: 'Materia', ej: 'Matemática' },
       { k: 'curso', t: 'Curso', op: cursos, def: cursoInicial },
       { k: 'profesor', t: 'Profesor', op: profes }];
-    case 'profesores': return [
+    case 'usuarios': return [
       { k: 'dni', t: 'DNI, sin puntos (va a ser su usuario)', num: true },
       { k: 'nombre', t: 'Apellido y nombre', ej: 'Ruiz, Carolina' },
+      { k: 'rol', t: 'Rol', op: pares(ROLES), def: 'Profesor' },
       { k: 'clave', t: item ? 'Clave nueva (dejala vacía para no cambiarla)' : 'Clave para entrar, de 4 caracteres o más' }];
     case 'alumnos': return [
       { k: 'dni', t: 'DNI, sin puntos', num: true },
-      { k: 'nombre', t: 'Apellido y nombre', ej: 'Acosta, Martina' },
-      { k: 'curso', t: 'Curso', op: cursos, def: cursoInicial }];
+      { k: 'apellido', t: 'Apellido', ej: 'Acosta' },
+      { k: 'nombres', t: 'Nombre', ej: 'Martina' },
+      { k: 'curso', t: 'Curso', op: cursos, def: cursoInicial },
+      { k: 'estado', t: 'Estado', op: pares(ESTADOS_ALUMNO), def: 'Activo' }];
   }
 }
 
@@ -801,25 +890,27 @@ function formulario(tipo, item) {
         : '<input id="c-' + c.k + '" type="text" autocomplete="off" maxlength="60"' + (c.num ? ' inputmode="numeric"' : '') +
           (c.ej ? ' placeholder="' + esc(c.ej) + '"' : '') + ' value="' + esc(v) + '">';
       return '<label for="c-' + c.k + '">' + esc(c.t) + '</label>' + campo;
-    }).join('');
+    }).join('') +
+    (tipo === 'alumnos' && !item ? '<p class="nota">El código personal se genera solo al guardar.</p>' : '') +
+    (tipo === 'alumnos' && item ? '<p class="nota">Si dejó la escuela, cambiá el estado en lugar de borrarlo: sigue en el padrón y deja de aparecer en las listas.</p>' : '');
 
   abrirDialogo(html, 'Guardar', async function (capa) {
     const datos = {};
     campos.forEach(function (c) { datos[c.k] = capa.querySelector('#c-' + c.k).value.trim(); });
     const cat = await apiDocente('guardar', { tipo: tipo, clave: item ? item[CLAVE_DE[tipo]] : '', datos: datos });
-    if (tipo === 'cursos' && item && S.filtroCurso === item.nombre) S.filtroCurso = datos.nombre;
+    if (tipo === 'cursos' && item && S.filtroCurso === item.nombre) S.filtroCurso = (datos.anio + ' ' + datos.division).trim();
     catalogoNuevo(cat);
   });
 }
 
 function pedirBorrado(tipo, item) {
   if (!item) return;
-  const nombre = { cursos: item.nombre, materias: item.materia + ' de ' + item.curso, profesores: item.nombre, alumnos: item.nombre }[tipo];
+  const nombre = { cursos: item.nombre, materias: item.materia + ' de ' + item.curso, usuarios: item.nombre, alumnos: item.nombre }[tipo];
   const detalle = {
     cursos: 'Se borran también las materias cargadas en ese curso. Las asistencias ya registradas no se tocan.',
     materias: 'Las clases que ya se dieron quedan en el historial.',
-    profesores: 'No va a poder entrar más. Sus materias quedan sin profesor asignado.',
-    alumnos: 'Sus asistencias ya registradas quedan en la planilla.'
+    usuarios: 'No va a poder entrar más. Sus materias quedan sin profesor asignado.',
+    alumnos: 'Si dejó la escuela, es mejor cambiar su estado desde Editar. Sus asistencias ya registradas no se borran.'
   }[tipo];
   abrirDialogo('<h2 id="dlg-t">¿Borrar ' + esc(nombre) + '?</h2><p>' + detalle + '</p>', 'Sí, borrar', async function () {
     catalogoNuevo(await apiDocente('borrar', { tipo: tipo, clave: item[CLAVE_DE[tipo]] }));
@@ -829,10 +920,42 @@ function pedirBorrado(tipo, item) {
 function pedirDesvincular(alumno) {
   if (!alumno) return;
   abrirDialogo('<h2 id="dlg-t">¿Desvincular el celular de ' + esc(alumno.nombre) + '?</h2>' +
-    '<p>Sirve para cuando cambió de teléfono. La próxima vez que escanee va a registrar el celular que use en ese momento.</p>',
+    '<p>La próxima vez que escanee va a tener que escribir su código personal, y queda vinculado el celular que use en ese momento.</p>',
     'Sí, desvincular', async function () {
       catalogoNuevo(await apiDocente('desvincular', { dni: alumno.dni }));
     });
+}
+
+function pedirNuevoCodigo(alumno) {
+  if (!alumno) return;
+  abrirDialogo('<h2 id="dlg-t">¿Generar un código nuevo para ' + esc(alumno.nombre) + '?</h2>' +
+    '<p>El código actual (<span class="codigo">' + esc(alumno.codigo) + '</span>) deja de servir. Usalo si lo perdió o si otra persona lo conoce.</p>',
+    'Sí, generar', async function () {
+      catalogoNuevo(await apiDocente('nuevoCodigo', { dni: alumno.dni }));
+    });
+}
+
+/** Papelitos para recortar, uno por alumno, con su código personal. */
+function imprimirCodigos() {
+  const lista = alumnosFiltrados().filter(function (a) { return a.codigo && a.estado === 'Activo'; });
+  if (!lista.length) return avisar('No hay alumnos activos con código en este filtro.');
+  const viejo = document.getElementById('impresion');
+  if (viejo) viejo.remove();
+  const div = document.createElement('div');
+  div.id = 'impresion';
+  div.innerHTML = '<div class="papeles">' + lista.map(function (a) {
+    return '<div class="papel">' +
+      '<p class="papel-escuela">' + esc(S.escuela) + '</p>' +
+      '<p class="papel-nombre">' + esc(a.nombre) + '</p>' +
+      '<p>' + esc(a.curso) + ' · DNI ' + esc(a.dni) + '</p>' +
+      '<p>Código personal: <b class="papel-cod">' + esc(a.codigo) + '</b></p>' +
+      '<p class="papel-nota">Lo vas a necesitar una sola vez, la primera vez que des el presente con tu celular. No lo compartas.</p>' +
+    '</div>';
+  }).join('') + '</div>';
+  document.body.appendChild(div);
+  const quitar = function () { div.remove(); window.removeEventListener('afterprint', quitar); };
+  window.addEventListener('afterprint', quitar);
+  window.print();
 }
 
 
@@ -844,7 +967,7 @@ let ultimo = null;           // último estado recibido
 let tokenDibujado = '';
 let modoTablero = '';
 let vistos = null;           // DNIs que ya estaban marcados (para animar solo los nuevos)
-let filaAbierta = null;      // DNI con las opciones de marcado manual desplegadas
+let filaAbierta = null;      // DNI con las opciones de corrección desplegadas
 let firmaLista = '';
 
 function detener() {
@@ -859,9 +982,7 @@ function vistaClase(e) {
   claseActiva = e.clase.id;
   ultimo = null; tokenDibujado = ''; modoTablero = ''; vistos = null; filaAbierta = null; firmaLista = '';
 
-  const abierta = e.clase.estado === 'ABIERTA';
-  const cuando = abierta ? 'desde las ' + hora(e.clase.inicio) : dia(e.clase.inicio) + ' a las ' + hora(e.clase.inicio);
-  const detalle = [e.clase.materia, e.clase.docente, cuando].filter(Boolean).join(', ');
+  const detalle = [e.clase.materia, e.clase.docente, dia(e.clase.inicio) + ', ' + hora(e.clase.inicio)].filter(Boolean).join(' · ');
   app.innerHTML =
     '<div class="clase">' +
       '<header class="barra">' +
@@ -882,7 +1003,7 @@ function vistaClase(e) {
   app.onkeydown = null; app.onchange = null; app.oninput = null;
   app.onclick = clicEnClase;
   pintar(e);
-  if (abierta) programar(Math.min(4000, e.msRestantes + 300));
+  if (e.clase.estado === 'ABIERTA') programar(Math.min(4000, e.msRestantes + 300));
 }
 
 function programar(ms) {
@@ -909,6 +1030,9 @@ async function ciclo() {
   }
 }
 
+const BOTONES_ABIERTA = '<button class="btn claro" id="extender" type="button">+10 minutos</button>' +
+  '<button class="btn rojo" id="cerrar" type="button">Cerrar clase</button>';
+
 function pintar(e) {
   if (!$('#lista')) return;
   ultimo = e;
@@ -928,16 +1052,20 @@ function pintar(e) {
   if (abierta) {
     if (modoTablero !== 'abierta') {
       modoTablero = 'abierta';
+      tokenDibujado = '';
+      $('#proyectar').hidden = false;
       $('#tablero').innerHTML =
         '<div class="qr" id="qr"></div>' +
         '<div class="tiempo"><i id="reloj"></i></div>' +
         '<p class="instruccion">Abrí la cámara del celular y apuntá al código</p>' +
-        '<p class="conteo"><b id="n">0</b> de <span id="total">0</span> presentes</p>';
-      $('#zona-cierre').innerHTML = '<button class="btn rojo" id="cerrar" type="button">Cerrar clase</button>';
-      $('#ayuda-lista').textContent = 'Si alguien no tiene celular, tocá su nombre para marcarlo a mano.';
+        '<p class="conteo"><b id="n">0</b> de <span id="total">0</span> presentes</p>' +
+        '<p class="nota" id="cierre-info"></p>';
+      $('#zona-cierre').innerHTML = BOTONES_ABIERTA;
+      $('#ayuda-lista').textContent = 'Tocá un nombre para marcarlo a mano o corregirlo.';
     }
     $('#n').textContent = presentes + tardes;
     $('#total').textContent = total;
+    $('#cierre-info').textContent = 'Se cierra sola a las ' + hora(e.cierre) + '.';
     if (e.token !== tokenDibujado) {
       tokenDibujado = e.token;
       dibujarQR(location.href.split(/[?#]/)[0] + '?c=' + e.clase.id + '&t=' + encodeURIComponent(e.token));
@@ -948,44 +1076,51 @@ function pintar(e) {
     proyectar(false);
     $('#zona-cierre').innerHTML = '';
     $('#proyectar').hidden = true;
-    $('#ayuda-lista').textContent = '';
+    $('#ayuda-lista').textContent = 'Tocá un nombre para corregir su asistencia. Hace falta indicar el motivo.';
     $('#tablero').innerHTML =
       '<h2 style="font-size:1.6rem">Clase cerrada</h2>' +
       '<dl class="resumen">' +
-        '<div><dt>' + (presentes === 1 ? 'presente' : 'presentes') + '</dt><dd>' + presentes + '</dd></div>' +
-        '<div><dt>tarde</dt><dd>' + tardes + '</dd></div>' +
-        '<div><dt>' + (ausentes === 1 ? 'ausente' : 'ausentes') + '</dt><dd>' + ausentes + '</dd></div>' +
+        '<div><dt id="r-pt">presentes</dt><dd id="r-p"></dd></div>' +
+        '<div><dt>tarde</dt><dd id="r-t"></dd></div>' +
+        '<div><dt id="r-at">ausentes</dt><dd id="r-a"></dd></div>' +
       '</dl>' +
-      '<p>Quedó guardado en la hoja Asistencias de la planilla.</p>';
+      '<p>Quedó guardado en la hoja Asistencias de la planilla.</p>' +
+      '<button class="btn claro" id="reabrir" type="button">Reabrir por 15 minutos</button>';
+  }
+  if (!abierta) {
+    $('#r-p').textContent = presentes; $('#r-pt').textContent = presentes === 1 ? 'presente' : 'presentes';
+    $('#r-t').textContent = tardes;
+    $('#r-a').textContent = ausentes; $('#r-at').textContent = ausentes === 1 ? 'ausente' : 'ausentes';
   }
 
   // Lista: se vuelve a dibujar solo si cambió algo.
-  const firma = [e.marcas.length, total, e.clase.estado, filaAbierta].join('|');
+  const firma = [e.marcas.map(function (m) { return m.dni + m.estado; }).join(), total, e.clase.estado, filaAbierta].join('|');
   if (firma === firmaLista) return;
   firmaLista = firma;
   const primera = !vistos;
   if (primera) vistos = {};
   $('#lista').innerHTML = e.alumnos.map(function (a) {
     const m = porDni[a.dni];
-    if (m) {
-      const nuevo = !primera && !vistos[a.dni] && m.estado !== 'Ausente';
-      vistos[a.dni] = true;
-      const letra = m.estado === 'Tarde' ? 'T' : m.estado === 'Ausente' ? 'A' : 'P';
-      return '<li' + (nuevo ? ' class="nuevo"' : '') + '><span class="nombre">' + esc(a.nombre) + '</span>' +
-        '<span class="hora">' + esc(m.hora) + '</span>' +
-        '<span class="marca ' + letra + '" role="img" aria-label="' + esc(m.estado) + '">' + letra + '</span></li>';
-    }
-    if (!abierta) {
-      return '<li><span class="nombre">' + esc(a.nombre) + '</span><span class="marca vacia"></span></li>';
-    }
+    const nuevo = m && !primera && !vistos[a.dni] && m.estado !== 'Ausente';
+    if (m) vistos[a.dni] = true;
+    const letra = m ? (m.estado === 'Tarde' ? 'T' : m.estado === 'Ausente' ? 'A' : 'P') : '';
+    const sello = m
+      ? '<span class="hora">' + esc(m.hora) + '</span><span class="marca ' + letra + '" role="img" aria-label="' + esc(m.estado) + '">' + letra + '</span>'
+      : '<span class="marca vacia" role="img" aria-label="Sin marcar"></span>';
     const desplegada = filaAbierta === a.dni;
-    return '<li><button class="fila" type="button" data-dni="' + esc(a.dni) + '" aria-expanded="' + desplegada + '">' +
-      '<span class="nombre">' + esc(a.nombre) + '</span><span class="marca vacia"></span></button>' +
-      (desplegada
-        ? '<div class="manual"><button class="btn" type="button" data-manual="Presente">Marcar presente</button>' +
-          '<button class="btn claro" type="button" data-manual="Tarde">Marcar tarde</button></div>'
-        : '') + '</li>';
+    let opciones = '';
+    if (desplegada) {
+      opciones = '<div class="manual">' +
+        (abierta ? '' : '<input id="motivo" type="text" maxlength="200" placeholder="Motivo de la corrección" aria-label="Motivo de la corrección">') +
+        ['Presente', 'Tarde', 'Ausente'].filter(function (x) { return !m || x !== m.estado; }).map(function (x, i) {
+          return '<button class="btn' + (i ? ' claro' : '') + '" type="button" data-corregir="' + x + '">' + (m ? 'Cambiar a ' : 'Marcar ') + x.toLowerCase() + '</button>';
+        }).join('') + '</div>';
+    }
+    return '<li' + (nuevo ? ' class="nuevo"' : '') + '><button class="fila" type="button" data-dni="' + esc(a.dni) + '" aria-expanded="' + desplegada + '">' +
+      '<span class="nombre">' + esc(a.nombre) + '</span>' + sello + '</button>' + opciones + '</li>';
   }).join('');
+  const motivo = $('#motivo');
+  if (motivo) motivo.focus();
 }
 
 function clicEnClase(ev) {
@@ -996,6 +1131,8 @@ function clicEnClase(ev) {
   const id = ultimo.clase.id;
 
   if (t.id === 'proyectar') return proyectar(!document.body.classList.contains('proyector'));
+  if (t.id === 'extender') return accionDeClase(t, 'extender', { c: id, minutos: 10 });
+  if (t.id === 'reabrir') return accionDeClase(t, 'reabrir', { c: id, minutos: 15 });
 
   if (t.id === 'cerrar') {
     const marcados = {};
@@ -1008,21 +1145,27 @@ function clicEnClase(ev) {
     $('#si-cerrar').focus();
     return;
   }
-  if (t.id === 'no-cerrar') {
-    $('#zona-cierre').innerHTML = '<button class="btn rojo" id="cerrar" type="button">Cerrar clase</button>';
-    return;
-  }
+  if (t.id === 'no-cerrar') { $('#zona-cierre').innerHTML = BOTONES_ABIERTA; return; }
   if (t.id === 'si-cerrar') return accionDeClase(t, 'cerrar', { c: id });
 
   if (t.dataset.dni) {
     filaAbierta = filaAbierta === t.dataset.dni ? null : t.dataset.dni;
     return pintar(ultimo);
   }
-  if (t.dataset.manual && filaAbierta) {
+  if (t.dataset.corregir && filaAbierta) {
+    const campo = $('#motivo');
+    const motivo = campo ? campo.value.trim() : '';
+    if (campo && motivo.length < 3) { campo.focus(); return avisarEnClase('Escribí el motivo de la corrección.'); }
     const dni = filaAbierta;
     filaAbierta = null;
-    return accionDeClase(t, 'manual', { c: id, dni: dni, estado: t.dataset.manual });
+    return accionDeClase(t, 'corregir', { c: id, dni: dni, estado: t.dataset.corregir, motivo: motivo });
   }
+}
+
+function avisarEnClase(texto) {
+  const aviso = $('#aviso');
+  aviso.textContent = texto;
+  aviso.hidden = false;
 }
 
 async function accionDeClase(boton, accion, datos) {
@@ -1031,15 +1174,14 @@ async function accionDeClase(boton, accion, datos) {
   try {
     const e = await apiDocente(accion, datos);
     if (claseActiva !== datos.c) return;
+    $('#aviso').hidden = true;
     pintar(e);
     if (e.clase.estado === 'ABIERTA') programar(Math.min(4000, e.msRestantes + 300));
   } catch (err) {
     if (err.silencio || claseActiva !== datos.c) return;
     ocupar(boton, false);
-    const aviso = $('#aviso');
-    aviso.textContent = err.message;
-    aviso.hidden = false;
-    programar(3000);
+    avisarEnClase(err.message);
+    if (ultimo && ultimo.clase.estado === 'ABIERTA') programar(3000);
   }
 }
 
@@ -1128,63 +1270,70 @@ async function vistaAlumno(c, t) {
   const x = { c: c, dispositivo: claveDispositivo() };
   try {
     if (dniGuardado) {
-      return exito(await api('marcar', { c: c, t: t, dni: dniGuardado, dispositivo: x.dispositivo }));
+      const r = await api('marcar', { c: c, t: t, dni: dniGuardado, dispositivo: x.dispositivo });
+      if (!r.necesitaCodigo) return exito(r);
+      x.pase = r.pase; x.curso = r.curso; x.materia = r.materia; x.dni = dniGuardado;
+      return pedirCredencial(x, 'Este celular no está vinculado a tu DNI. Escribí tu código personal para vincularlo.');
     }
     const s = await api('escanear', { c: c, t: t });
     x.pase = s.pase; x.curso = s.curso; x.materia = s.materia;
-    pedirDni(x);
+    pedirCredencial(x);
   } catch (e) {
     falla(e.message, !!dniGuardado);
   }
 }
 
-function pedirDni(x) {
+function pedirCredencial(x, mensaje) {
   app.innerHTML =
     '<section class="alumno">' +
       '<p class="donde">' + esc(x.curso) + (x.materia ? ', ' + esc(x.materia) : '') + '</p>' +
-      '<h1>Primera vez con este celular</h1>' +
-      '<p>Escribí tu DNI una sola vez. De ahora en más, con escanear el código alcanza.</p>' +
+      '<h1>Identificate</h1>' +
+      '<p>' + esc(mensaje || 'La primera vez con este celular necesitás tu DNI y el código personal que te dio preceptoría. Después, con escanear alcanza.') + '</p>' +
       '<label for="dni">Tu DNI, sin puntos</label>' +
-      '<input id="dni" type="text" inputmode="numeric" autocomplete="off" maxlength="10">' +
+      '<input id="dni" type="text" inputmode="numeric" autocomplete="off" maxlength="10" value="' + esc(x.dni || '') + '">' +
+      '<label for="codigo">Código personal</label>' +
+      '<input id="codigo" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="10">' +
       '<p class="error" id="err" role="alert"></p>' +
       '<button class="btn ancho" id="seguir" type="button">Continuar</button>' +
     '</section>';
 
-  const campo = $('#dni');
-  campo.focus();
+  (x.dni ? $('#codigo') : $('#dni')).focus();
   const seguir = async function () {
-    const dni = campo.value.replace(/\D/g, '');
+    const dni = $('#dni').value.replace(/\D/g, '');
+    const codigo = $('#codigo').value.trim();
     if (dni.length < 6) return mostrarError('Escribí tu DNI completo.');
+    if (!codigo) return mostrarError('Escribí tu código personal.');
     const boton = $('#seguir');
     ocupar(boton, true); mostrarError('');
     try {
-      const a = await api('consultar', { c: x.c, pase: x.pase, dni: dni });
-      confirmarIdentidad(x, dni, a.nombre);
+      const a = await api('identificar', { c: x.c, pase: x.pase, dni: dni, codigo: codigo });
+      confirmarIdentidad(x, dni, codigo, a.nombre);
     } catch (e) {
       ocupar(boton, false);
       mostrarError(e.message);
     }
   };
   app.onclick = function (ev) { if (ev.target.id === 'seguir') seguir(); };
-  app.onkeydown = function (ev) { if (ev.key === 'Enter' && ev.target.id === 'dni') seguir(); };
+  app.onkeydown = function (ev) { if (ev.key === 'Enter' && (ev.target.id === 'dni' || ev.target.id === 'codigo')) seguir(); };
 }
 
-function confirmarIdentidad(x, dni, nombre) {
+function confirmarIdentidad(x, dni, codigo, nombre) {
   app.innerHTML =
     '<section class="alumno">' +
       '<h1>¿Sos ' + esc(nombre) + '?</h1>' +
       '<p>Este celular queda vinculado a tu nombre y no va a servir para dar el presente de otra persona.</p>' +
       '<p class="error" id="err" role="alert"></p>' +
       '<button class="btn ancho" id="si" type="button">Sí, dar el presente</button>' +
-      '<button class="btn claro ancho" id="no" type="button">No, corregir el DNI</button>' +
+      '<button class="btn claro ancho" id="no" type="button">No, corregir los datos</button>' +
     '</section>';
   app.onkeydown = null;
   app.onclick = async function (ev) {
-    if (ev.target.id === 'no') return pedirDni(x);
+    if (ev.target.id === 'no') { x.dni = dni; return pedirCredencial(x); }
     if (ev.target.id !== 'si') return;
     ocupar(ev.target, true); mostrarError('');
     try {
-      const r = await api('marcar', { c: x.c, pase: x.pase, dni: dni, dispositivo: x.dispositivo });
+      const r = await api('marcar', { c: x.c, pase: x.pase, dni: dni, dispositivo: x.dispositivo, codigo: codigo });
+      if (r.necesitaCodigo) throw new Error('No pudimos vincular este celular. Volvé a escanear el código.');
       store.set('aq_dni', dni);
       exito(r);
     } catch (e) {
@@ -1196,12 +1345,15 @@ function confirmarIdentidad(x, dni, nombre) {
 
 function exito(r) {
   const tarde = r.estado === 'Tarde';
+  const titular = r.yaEstaba
+    ? (tarde ? 'Tu llegada tarde ya estaba registrada a las ' : 'Tu presente ya estaba registrado a las ') + r.hora + '.'
+    : (tarde ? '¡Llegada tarde registrada!' : '¡Presente registrado correctamente!');
   app.innerHTML =
     '<section class="alumno resultado ' + (tarde ? 'tarde' : 'ok') + '">' +
       '<h1>' + (tarde ? 'Tarde' : 'Presente') + '</h1>' +
       '<p class="quien">' + esc(r.nombre) + '</p>' +
-      '<p>' + esc(r.curso) + (r.materia ? ', ' + esc(r.materia) : '') + '</p>' +
-      '<p>' + (r.yaEstaba ? 'Ya habías dado el presente a las ' : 'Registrado a las ') + esc(r.hora) + '</p>' +
+      '<p class="confirmacion">' + esc(titular) + '</p>' +
+      '<p>' + esc(r.curso) + (r.materia ? ', ' + esc(r.materia) : '') + (r.yaEstaba ? '' : ' · ' + esc(r.hora)) + '</p>' +
       '<p class="nota">Ya podés cerrar esta página.</p>' +
     '</section>';
   app.onkeydown = null; app.onclick = null;
@@ -1222,7 +1374,7 @@ function falla(mensaje, teniaDni) {
     if (ev.target.id !== 'olvidar') return;
     store.del('aq_dni');
     ev.target.remove();
-    $('#que-hacer').textContent = 'Listo, se borró el DNI guardado. Volvé a escanear el código y escribí el tuyo.';
+    $('#que-hacer').textContent = 'Listo, se borró el DNI guardado. Volvé a escanear el código y escribí tus datos.';
   };
 }
 
@@ -1240,8 +1392,14 @@ function falla(mensaje, teniaDni) {
 
   if (sesion) {
     app.innerHTML = '<section class="alumno espera"><p>Cargando…</p></section>';
-    try { return entrarAlPanel(await apiDocente('inicio', {})); }
-    catch (e) { if (e.silencio) return; }
+    try {
+      const d = await apiDocente('inicio', {});
+      if (d.minutosClase === undefined) throw new Error(VIEJO);
+      return entrarAlPanel(d);
+    } catch (e) {
+      if (e.silencio) return;
+      return vistaLogin(e.message === VIEJO ? VIEJO : '');
+    }
   }
   vistaLogin();
 })();
