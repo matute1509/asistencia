@@ -21,11 +21,12 @@ const API_URL = "https://script.google.com/macros/s/AKfycbxCnEQm0L5WckUnYz0Y8Afd
 
 <style>
 :root{
-  --pizarron:#1F4037; --pizarron-claro:#2B5549; --pizarron-hondo:#173028;
-  --marco:#B98C5F;
+  /* Colores de la bandera bonaerense: azul arriba, línea roja, verde abajo y el sol amarillo. */
+  --pizarron:#1D4F91; --pizarron-claro:#2A64B0; --pizarron-hondo:#153B6E;
+  --verde:#1F7A3A; --verde-claro:#2A9147; --verde-hondo:#175C2C;
   --tiza:#F4F6F0; --papel:#FAFBF7; --renglon:#CFD9E6;
   --tinta:#1A2230; --tinta-suave:#566070;
-  --birome:#2348B5; --amarillo:#F2C744; --rojo:#C23B2A;
+  --birome:#1D4F91; --amarillo:#FFC72C; --rojo:#D2232A;
   --titulo:"Bricolage Grotesque","Trebuchet MS","Segoe UI",system-ui,sans-serif;
   --texto:"Atkinson Hyperlegible","Segoe UI",system-ui,-apple-system,sans-serif;
 }
@@ -46,7 +47,7 @@ button,input,select{font:inherit;color:inherit}
 .hoja{max-width:34rem;margin:0 auto;padding:clamp(1rem,4vw,2.5rem) clamp(1rem,4vw,1.5rem) 3rem}
 .pizarra{
   background:radial-gradient(130% 100% at 15% 0%,var(--pizarron-claro) 0%,var(--pizarron) 50%,var(--pizarron-hondo) 100%);
-  color:var(--tiza);border:7px solid var(--marco);border-radius:14px;padding:clamp(1.25rem,4vw,2.25rem);
+  color:var(--tiza);border:0;border-bottom:12px solid var(--verde);box-shadow:inset 0 -5px 0 var(--rojo);border-radius:14px;padding:clamp(1.25rem,4vw,2.25rem) clamp(1.25rem,4vw,2.25rem) calc(clamp(1.25rem,4vw,2.25rem) + 5px);
 }
 label{display:block;font-weight:700;margin:1.1rem 0 .35rem}
 input[type=text],input[type=password],input[type=search],select{
@@ -78,12 +79,12 @@ input[type=text],input[type=password],input[type=search],select{
 
 /* ── Panel con secciones ── */
 .marco{min-height:100vh;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto 1fr}
-.tope{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem 1.25rem;padding:.7rem clamp(1rem,3vw,2rem);background:var(--pizarron);color:var(--tiza)}
+.tope{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem 1.25rem;padding:.7rem clamp(1rem,3vw,2rem);background:var(--pizarron);color:var(--tiza);border-bottom:4px solid var(--rojo)}
 .tope .escuela{font-family:var(--titulo);font-size:1.25rem;font-weight:700;margin-right:auto}
 .menu{display:flex;gap:.25rem;overflow-x:auto;padding:.5rem clamp(.75rem,3vw,2rem);border-bottom:1.5px solid var(--tinta)}
 .menu button{flex:none;padding:.5rem .9rem;border:0;border-radius:8px;background:none;font-weight:700;cursor:pointer;text-align:left}
 .menu button:hover{background:rgba(26,34,48,.07)}
-.menu button[aria-current=page]{background:var(--tinta);color:#fff}
+.menu button[aria-current=page]{background:var(--pizarron);color:#fff}
 .contenido{padding:clamp(1rem,3vw,2rem) clamp(1rem,3vw,2rem) 4rem;width:100%;max-width:68rem}
 @media(min-width:900px){
   .marco{grid-template-columns:13.5rem minmax(0,1fr);grid-template-rows:auto 1fr}
@@ -113,7 +114,7 @@ td small{display:block;color:var(--tinta-suave);font-size:.9rem}
 .etiqueta{display:inline-block;padding:.05rem .5rem;border-radius:5px;background:#FFF4CC;font-size:.88rem;font-weight:700}
 .pct{display:inline-flex;align-items:center;gap:.5rem;justify-content:flex-end}
 .pct i{display:block;width:4.5rem;height:.5rem;border-radius:3px;background:var(--renglon);overflow:hidden}
-.pct i b{display:block;height:100%;background:var(--pizarron)}
+.pct i b{display:block;height:100%;background:var(--verde)}
 .pct span{min-width:2.6rem;text-align:right;font-variant-numeric:tabular-nums}
 
 /* En celular cada fila se apila: el dato principal arriba, el resto con su etiqueta y los botones abajo. */
@@ -169,7 +170,7 @@ td small{display:block;color:var(--tinta-suave);font-size:.9rem}
 .nombre{flex:1;min-width:9rem}
 .hora{color:var(--tinta-suave);font-size:.92rem;font-variant-numeric:tabular-nums}
 .marca{flex:none;width:2.1rem;height:2.1rem;border-radius:50%;display:grid;place-items:center;font-family:var(--titulo);font-weight:800;border:2px solid currentColor}
-.marca.P{color:var(--birome);transform:rotate(-7deg)}
+.marca.P{color:var(--verde);transform:rotate(-7deg)}
 .marca.T{color:#8A6400;background:#FFF4CC;transform:rotate(5deg)}
 .marca.A{color:var(--rojo)}
 .marca.vacia{border:1.5px dashed #9AA5B4}
@@ -197,7 +198,7 @@ body.proyector .qr,body.proyector .tiempo{width:min(100%,66vh)}
 .resultado .quien{font-size:1.55rem;font-weight:700;margin-top:1rem}
 .resultado .nota{margin-top:1.75rem}
 .resultado .btn{margin-top:1.5rem}
-.resultado.ok{background:radial-gradient(130% 100% at 15% 0%,var(--pizarron-claro) 0%,var(--pizarron) 50%,var(--pizarron-hondo) 100%);color:var(--tiza)}
+.resultado.ok{background:radial-gradient(130% 100% at 15% 0%,var(--verde-claro) 0%,var(--verde) 50%,var(--verde-hondo) 100%);color:var(--tiza);box-shadow:inset 0 6px 0 var(--rojo)}
 .resultado.ok .nota{color:inherit;opacity:.8}
 .resultado.tarde{background:var(--amarillo)}
 .resultado.tarde .nota{color:inherit}
